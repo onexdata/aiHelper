@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>aiHelper</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div class="overlay">
+      <div id="tab-content" class="tab-content">
+        <!-- Conversations tab (wraps existing history + chat views) -->
+        <div id="conversations-panel" class="tab-panel">
+          <div id="history-view" class="view">
+            <div class="history-header drag-region">
+              <span class="history-title">Conversations</span>
+              <button id="new-chat-btn" class="icon-btn" title="New conversation">+</button>
+            </div>
+            <div id="conversation-list" class="conversation-list"></div>
+          </div>
+
+          <div id="chat-view" class="view" style="display: none;">
+            <div class="chat-header drag-region">
+              <button id="back-btn" class="icon-btn" title="Back to conversations">&larr;</button>
+              <span id="chat-title" class="chat-title-text">New conversation</span>
+              <button id="chat-new-btn" class="icon-btn" title="New conversation">+</button>
+              <button id="close-btn" class="icon-btn" title="Close">&times;</button>
+            </div>
+            <div id="chat-messages" class="chat-messages"></div>
+            <div class="chat-input-row">
+              <textarea id="chat-input" class="chat-input" placeholder="Type a message..." rows="1"></textarea>
+              <button id="send-btn" class="send-btn">Send</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Placeholder tabs -->
+        <div id="projects-panel" class="tab-panel" style="display: none;">
+          <div class="projects-header drag-region">
+            <span class="projects-title">Projects</span>
+            <button class="icon-btn close-tab-btn" title="Close">&times;</button>
+          </div>
+          <div class="projects-toolbar">
+            <button id="projects-new-btn" class="projects-action-btn">+ New Project</button>
+            <button id="projects-suggest-btn" class="projects-action-btn secondary">Auto-Suggest</button>
+            <button id="projects-smart-suggest-btn" class="projects-action-btn ai">Smart Suggest</button>
+          </div>
+          <div id="projects-body" class="projects-body"></div>
+          <div id="projects-untagged" class="projects-untagged" style="display: none;"></div>
+        </div>
+
+        <div id="tasks-panel" class="tab-panel" style="display: none;">
+          <div class="tasks-header drag-region">
+            <span class="tasks-title">Tasks</span>
+            <button class="icon-btn close-tab-btn" title="Close">&times;</button>
+          </div>
+          <div class="tasks-sub-tabs">
+            <button class="tasks-sub-tab active" data-subtab="active">Active</button>
+            <button class="tasks-sub-tab" data-subtab="archived">Archived</button>
+          </div>
+          <div id="task-context" class="task-context"></div>
+          <div id="task-input-row" class="task-input-row">
+            <input id="task-input" class="task-input" type="text" placeholder="Add a task..." />
+          </div>
+          <div id="task-list" class="task-list"></div>
+        </div>
+
+        <div id="tips-panel" class="tab-panel" style="display: none;">
+          <div class="tips-header drag-region">
+            <span class="tips-title">Tips</span>
+            <button class="icon-btn close-tab-btn" title="Close">&times;</button>
+          </div>
+          <div class="tips-controls">
+            <div class="settings-range-row">
+              <span style="font-size:13px;color:#aaa;">Interval</span>
+              <input type="range" id="tips-interval-slider" class="settings-range" min="1" max="60" value="5" />
+              <span id="tips-interval-value" class="settings-range-value">5 min</span>
+            </div>
+            <label class="tips-checkbox-label">
+              <input type="checkbox" id="tips-background-checkbox" />
+              Generate tips in background
+            </label>
+            <button id="tips-generate-now-btn" class="tips-generate-btn">Generate Now</button>
+          </div>
+          <div id="tips-feed" class="tips-feed"></div>
+          <div id="tips-loading" class="tips-loading" style="display:none;">Generating tip...</div>
+        </div>
+
+        <div id="meetings-panel" class="tab-panel" style="display: none;">
+          <div class="placeholder-header drag-region">
+            <span class="placeholder-title">Meetings</span>
+            <button class="icon-btn close-tab-btn" title="Close">&times;</button>
+          </div>
+          <div class="placeholder-body">
+            <span class="placeholder-text">Coming soon</span>
+          </div>
+        </div>
+
+        <div id="stats-panel" class="tab-panel" style="display: none;">
+          <div class="stats-header drag-region">
+            <span class="stats-title">Stats</span>
+            <button class="icon-btn close-tab-btn" title="Close">&times;</button>
+          </div>
+          <div class="stats-body">
+            <!-- WPM -->
+            <div class="stats-section">
+              <div class="stats-section-title">Words Per Minute</div>
+              <div id="stats-wpm" class="stats-wpm">0</div>
+            </div>
+
+            <!-- Keystrokes -->
+            <div class="stats-section">
+              <div class="stats-section-title">Keystrokes</div>
+              <div id="stats-keystrokes" class="stats-cards"></div>
+            </div>
+
+            <!-- Mouse Distance -->
+            <div class="stats-section">
+              <div class="stats-section-title">Mouse Distance</div>
+              <div id="stats-mouse" class="stats-cards"></div>
+            </div>
+
+            <!-- Top Windows Today -->
+            <div class="stats-section">
+              <div class="stats-section-title">Top Windows Today</div>
+              <div id="stats-windows" class="stats-windows"></div>
+            </div>
+
+            <!-- Recent Input -->
+            <div class="stats-section">
+              <div class="stats-section-title-row">
+                <div class="stats-section-title">Recent Input</div>
+                <button id="stats-raw-toggle" class="stats-toggle-btn" title="Toggle raw/clean view">Clean</button>
+              </div>
+              <div id="stats-recent" class="stats-recent"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="settings-panel" class="tab-panel" style="display: none;">
+          <div class="settings-header drag-region">
+            <span class="settings-title">Settings</span>
+            <button class="icon-btn close-tab-btn" title="Close">&times;</button>
+          </div>
+          <div class="settings-body">
+            <!-- AI Configuration -->
+            <div class="settings-section">
+              <div class="settings-section-title">AI Configuration</div>
+              <label class="settings-label">Provider
+                <input type="text" class="settings-input" data-key="ai_provider" placeholder="e.g. openrouter" />
+              </label>
+              <label class="settings-label">API Key
+                <div class="settings-password-row">
+                  <input type="password" class="settings-input" data-key="ai_api_key" placeholder="sk-..." />
+                  <button type="button" class="settings-toggle-btn" data-toggle="ai_api_key">Show</button>
+                </div>
+              </label>
+              <label class="settings-label">Base URL
+                <input type="text" class="settings-input" data-key="ai_base_url" placeholder="https://openrouter.ai/api/v1" />
+              </label>
+              <label class="settings-label">Default Model
+                <input type="text" class="settings-input" data-key="ai_default_model" placeholder="openai/gpt-4o-mini" />
+              </label>
+              <label class="settings-label">System Prompt
+                <textarea class="settings-input settings-textarea" data-key="ai_system_prompt"
+                  rows="3" placeholder="You are a helpful assistant."></textarea>
+              </label>
+            </div>
+
+            <!-- Shortcuts -->
+            <div class="settings-section">
+              <div class="settings-section-title">Shortcuts</div>
+              <label class="settings-label">Toggle Hotkey
+                <input type="text" class="settings-input" data-key="hotkey" placeholder="Ctrl+Shift+Space" />
+              </label>
+            </div>
+
+            <!-- Behavior -->
+            <div class="settings-section">
+              <div class="settings-section-title">Behavior</div>
+              <label class="settings-label">Archive Delay (seconds)
+                <input type="number" class="settings-input" data-key="task_archive_delay_secs" min="1" max="60" />
+              </label>
+              <label class="settings-label">Screen Size (diagonal inches)
+                <input type="number" class="settings-input" data-key="screen_size_inches" min="10" max="85" step="0.5" />
+              </label>
+            </div>
+
+            <!-- Appearance -->
+            <div class="settings-section">
+              <div class="settings-section-title">Appearance</div>
+              <label class="settings-label">Overlay Opacity
+                <div class="settings-range-row">
+                  <input type="range" class="settings-range" data-key="overlay_opacity" min="0.5" max="1.0" step="0.05" />
+                  <span class="settings-range-value" data-range-for="overlay_opacity">0.95</span>
+                </div>
+              </label>
+              <label class="settings-label">Tab Icon Size (px)
+                <div class="settings-range-row">
+                  <input type="range" class="settings-range" data-key="tab_icon_size" min="12" max="24" step="1" />
+                  <span class="settings-range-value" data-range-for="tab_icon_size">16</span>
+                </div>
+              </label>
+            </div>
+
+            <div class="settings-actions">
+              <button id="settings-save-btn" class="settings-save-btn">Save</button>
+              <span id="settings-toast" class="settings-toast"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="tab-bar" class="tab-bar">
+        <button class="tab-btn active" data-tab="conversations" title="Conversations">&#x1F4AC;</button>
+        <button class="tab-btn" data-tab="projects" title="Projects">&#x1F4C1;</button>
+        <button class="tab-btn" data-tab="tasks" title="Tasks">&#x2611;</button>
+        <button class="tab-btn" data-tab="tips" title="Tips">&#x1F4A1;</button>
+        <button class="tab-btn" data-tab="meetings" title="Meetings">&#x1F4C5;</button>
+        <button class="tab-btn" data-tab="stats" title="Stats">&#x1F4CA;</button>
+        <button class="tab-btn" data-tab="settings" title="Settings">&#x2699;</button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

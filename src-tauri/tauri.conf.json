@@ -1,0 +1,44 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nickelpack/tauri-docs/refs/heads/v2/tooling/cli/node/schema.json",
+  "productName": "aiHelper",
+  "version": "0.1.0",
+  "identifier": "com.onexdata.aihelper",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "overlay",
+        "title": "aiHelper",
+        "visible": false,
+        "width": 500,
+        "height": 500,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "skipTaskbar": true,
+        "center": true,
+        "resizable": true,
+        "minWidth": 300,
+        "minHeight": 300
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
