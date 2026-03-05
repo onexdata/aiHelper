@@ -65,6 +65,25 @@
           <div id="task-list" class="task-list"></div>
         </div>
 
+        <div id="notes-panel" class="tab-panel" style="display: none;">
+          <div class="notes-header drag-region">
+            <span class="notes-title">Notes</span>
+            <button class="icon-btn close-tab-btn" title="Close">&times;</button>
+          </div>
+          <div id="note-input-row" class="note-input-row">
+            <input id="note-title-input" class="note-title-input" type="text" placeholder="New note title..." />
+          </div>
+          <div id="note-editor" class="note-editor" style="display: none;">
+            <input id="note-edit-title" class="note-edit-title" type="text" placeholder="Title" />
+            <textarea id="note-edit-content" class="note-edit-content" placeholder="Write your note..."></textarea>
+            <div class="note-editor-actions">
+              <button id="note-save-btn" class="note-action-btn">Save</button>
+              <button id="note-back-btn" class="note-action-btn secondary">Back</button>
+            </div>
+          </div>
+          <div id="note-list" class="note-list"></div>
+        </div>
+
         <div id="tips-panel" class="tab-panel" style="display: none;">
           <div class="tips-header drag-region">
             <span class="tips-title">Tips</span>
@@ -215,6 +234,7 @@
         <button class="tab-btn active" data-tab="conversations" title="Conversations">&#x1F4AC;</button>
         <button class="tab-btn" data-tab="projects" title="Projects">&#x1F4C1;</button>
         <button class="tab-btn" data-tab="tasks" title="Tasks">&#x2611;</button>
+        <button class="tab-btn" data-tab="notes" title="Notes">&#x1F4DD;</button>
         <button class="tab-btn" data-tab="tips" title="Tips">&#x1F4A1;</button>
         <button class="tab-btn" data-tab="meetings" title="Meetings">&#x1F4C5;</button>
         <button class="tab-btn" data-tab="stats" title="Stats">&#x1F4CA;</button>

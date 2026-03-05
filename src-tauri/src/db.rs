@@ -2,7 +2,7 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-const CURRENT_VERSION: i32 = 9;
+const CURRENT_VERSION: i32 = 11;
 
 pub struct Database {
     conn: Connection,
@@ -111,6 +111,15 @@ pub struct UntaggedSummaryRow {
     pub total: i64,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Note {
+    pub id: i64,
+    pub title: String,
+    pub content: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Serialize, Clone)]
 pub struct ProjectActivity {
     pub id: i64,
@@ -185,6 +194,14 @@ impl Database {
 
         if version < 9 {
             self.migrate_v8()?;
+        }
+
+        if version < 10 {
+            self.migrate_v9()?;
+        }
+
+        if version < 11 {
+            self.migrate_v10()?;
         }
 
         if version < CURRENT_VERSION {
@@ -1416,6 +1433,109 @@ impl Database {
         Ok(rows)
     }
 
+    // --- Migration v9: tips table ---
+
+    fn migrate_v9(&mut self) -> Result<(), String> {
+        self.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS tips (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_tips_created ON tips(created_at);",
+            )
+            .map_err(|e| format!("Migration v9 failed: {e}"))?;
+        Ok(())
+    }
+
+    // --- Tips CRUD ---
+
+    pub fn insert_tip(&self, content: &str) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO tips (content) VALUES (?1)",
+                params![content],
+            )
+            .map_err(|e| format!("Failed to insert tip: {e}"))?;
+        Ok(())
+    }
+
+    pub fn get_recent_tips(&self, limit: i64) -> Result<Vec<(String, String)>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT content, created_at FROM tips ORDER BY id DESC LIMIT ?1",
+            )
+            .map_err(|e| format!("Failed to prepare get_recent_tips: {e}"))?;
+
+        let rows = stmt
+            .query_map(params![limit], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| format!("Failed to query tips: {e}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to read tip row: {e}"))?;
+
+        Ok(rows)
+    }
+
+    /// Aggregates recent keystrokes into a human-readable summary (per-app char counts + app switches).
+    pub fn summarize_recent_keystrokes(&self, limit_chars: i64) -> Result<String, String> {
+        let rows = self.get_recent_keystrokes(limit_chars)?;
+        if rows.is_empty() {
+            return Ok("No recent keystrokes recorded.".to_string());
+        }
+
+        let mut app_chars: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut app_switches = 0usize;
+        let mut last_app: Option<String> = None;
+
+        for (app_name, chars) in &rows {
+            *app_chars.entry(app_name.clone()).or_insert(0) += chars.len();
+            if let Some(ref prev) = last_app {
+                if prev != app_name {
+                    app_switches += 1;
+                }
+            }
+            last_app = Some(app_name.clone());
+        }
+
+        // Sort by char count descending
+        let mut sorted: Vec<_> = app_chars.into_iter().collect();
+        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+
+        let mut summary = String::new();
+        for (app, count) in &sorted {
+            summary.push_str(&format!("- {} chars in {}\n", count, app));
+        }
+        summary.push_str(&format!("- {} app switches", app_switches));
+
+        Ok(summary)
+    }
+
+    // --- Time query methods ---
+
+    pub fn get_total_active_secs_today(&self) -> Result<i64, String> {
+        self.conn
+            .query_row(
+                "SELECT COALESCE(SUM(duration_secs), 0) FROM window_activity WHERE started_at >= date('now')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("Failed to get total active secs today: {e}"))
+    }
+
+    pub fn get_current_app_time_today(&self, app_name: &str) -> Result<i64, String> {
+        self.conn
+            .query_row(
+                "SELECT COALESCE(SUM(duration_secs), 0) FROM window_activity WHERE started_at >= date('now') AND app_name = ?1",
+                params![app_name],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("Failed to get app time today: {e}"))
+    }
+
     // --- Build chat context for AI ---
 
     pub fn build_chat_context(&self) -> Result<String, String> {
@@ -1475,6 +1595,95 @@ impl Database {
 
         ctx.push_str("--- End Activity Data ---\n");
         Ok(ctx)
+    }
+
+    // --- Migration v10: notes table ---
+
+    fn migrate_v10(&mut self) -> Result<(), String> {
+        self.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL DEFAULT '',
+                    content TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated_at);",
+            )
+            .map_err(|e| format!("Migration v10 failed: {e}"))?;
+        Ok(())
+    }
+
+    // --- Notes CRUD ---
+
+    pub fn create_note(&self, title: &str, content: &str) -> Result<Note, String> {
+        self.conn
+            .execute(
+                "INSERT INTO notes (title, content) VALUES (?1, ?2)",
+                params![title, content],
+            )
+            .map_err(|e| format!("Failed to create note: {e}"))?;
+        let id = self.conn.last_insert_rowid();
+        self.get_note(id)
+    }
+
+    pub fn get_note(&self, id: i64) -> Result<Note, String> {
+        self.conn
+            .query_row(
+                "SELECT id, title, content, created_at, updated_at FROM notes WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok(Note {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        content: row.get(2)?,
+                        created_at: row.get(3)?,
+                        updated_at: row.get(4)?,
+                    })
+                },
+            )
+            .map_err(|e| format!("Note not found: {e}"))
+    }
+
+    pub fn list_notes(&self) -> Result<Vec<Note>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, title, content, created_at, updated_at FROM notes ORDER BY updated_at DESC")
+            .map_err(|e| format!("Failed to prepare list_notes: {e}"))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(Note {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    content: row.get(2)?,
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
+                })
+            })
+            .map_err(|e| format!("Failed to query notes: {e}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to read note row: {e}"))?;
+
+        Ok(rows)
+    }
+
+    pub fn update_note(&self, id: i64, title: &str, content: &str) -> Result<Note, String> {
+        self.conn
+            .execute(
+                "UPDATE notes SET title = ?1, content = ?2, updated_at = datetime('now') WHERE id = ?3",
+                params![title, content, id],
+            )
+            .map_err(|e| format!("Failed to update note: {e}"))?;
+        self.get_note(id)
+    }
+
+    pub fn delete_note(&self, id: i64) -> Result<(), String> {
+        self.conn
+            .execute("DELETE FROM notes WHERE id = ?1", params![id])
+            .map_err(|e| format!("Failed to delete note: {e}"))?;
+        Ok(())
     }
 }
 

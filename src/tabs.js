@@ -5,6 +5,7 @@ import { loadSettings } from "./settings.js";
 import { startStatsRefresh, stopStatsRefresh } from "./stats.js";
 import { loadProjects } from "./projects.js";
 import { loadTips, stopTips } from "./tips.js";
+import { loadNoteList } from "./notes.js";
 
 let activeTab = "conversations";
 
@@ -73,6 +74,10 @@ export function switchTab(tabId) {
 
   if (tabId === "stats") {
     startStatsRefresh();
+  }
+
+  if (tabId === "notes") {
+    loadNoteList();
   }
 
   if (tabId === "tips") {

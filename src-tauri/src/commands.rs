@@ -3,10 +3,12 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
+use chrono::{Local, Timelike};
+
 use crate::ai::{self, ChatMessage};
 use crate::db::{
-    ActivityTag, ChatMessageRow, Conversation, Database, Project, ProjectActivity, ProjectRule,
-    ProjectSuggestion, ProjectSummary, Task, UntaggedActivity, UntaggedSummaryRow,
+    ActivityTag, ChatMessageRow, Conversation, Database, Note, Project, ProjectActivity,
+    ProjectRule, ProjectSuggestion, ProjectSummary, Task, UntaggedActivity, UntaggedSummaryRow,
 };
 use crate::tools::{self, ToolCallResult};
 
@@ -430,6 +432,47 @@ pub fn delete_task(state: State<DbState>, task_id: i64) -> Result<(), String> {
     db.delete_task(task_id)
 }
 
+// --- Note commands ---
+
+#[tauri::command]
+pub fn create_note(
+    db_state: State<DbState>,
+    title: String,
+    content: String,
+) -> Result<Note, String> {
+    let db = db_state.db.lock().map_err(|e| format!("Lock error: {e}"))?;
+    db.create_note(&title, &content)
+}
+
+#[tauri::command]
+pub fn list_notes(db_state: State<DbState>) -> Result<Vec<Note>, String> {
+    let db = db_state.db.lock().map_err(|e| format!("Lock error: {e}"))?;
+    db.list_notes()
+}
+
+#[tauri::command]
+pub fn get_note(db_state: State<DbState>, id: i64) -> Result<Note, String> {
+    let db = db_state.db.lock().map_err(|e| format!("Lock error: {e}"))?;
+    db.get_note(id)
+}
+
+#[tauri::command]
+pub fn update_note(
+    db_state: State<DbState>,
+    id: i64,
+    title: String,
+    content: String,
+) -> Result<Note, String> {
+    let db = db_state.db.lock().map_err(|e| format!("Lock error: {e}"))?;
+    db.update_note(id, &title, &content)
+}
+
+#[tauri::command]
+pub fn delete_note(db_state: State<DbState>, id: i64) -> Result<(), String> {
+    let db = db_state.db.lock().map_err(|e| format!("Lock error: {e}"))?;
+    db.delete_note(id)
+}
+
 #[tauri::command]
 pub fn get_foreground_title(state: State<ForegroundTitleState>) -> Result<String, String> {
     let title = state
@@ -809,12 +852,52 @@ IMPORTANT:
 
 // --- Generate Tip (AI-powered) ---
 
+fn format_active_time(secs: i64) -> String {
+    if secs < 60 {
+        format!("{}s", secs)
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else {
+        let h = secs / 3600;
+        let m = (secs % 3600) / 60;
+        format!("{}h {}m", h, m)
+    }
+}
+
+fn time_of_day_label(hour: u32) -> &'static str {
+    match hour {
+        5..=11 => "morning",
+        12..=16 => "afternoon",
+        17..=20 => "evening",
+        _ => "night",
+    }
+}
+
 #[tauri::command]
 pub async fn generate_tip(
     db_state: State<'_, DbState>,
+    fg_state: State<'_, ForegroundTitleState>,
 ) -> Result<String, String> {
-    // Read AI config + activity context under lock, then drop before await
-    let (api_key, base_url, model, context, keystrokes) = {
+    // Get current app from foreground title
+    let current_app = {
+        let title = fg_state
+            .title
+            .lock()
+            .map_err(|e| format!("Lock error: {e}"))?;
+        title
+            .rsplit(" - ")
+            .next()
+            .unwrap_or(&title)
+            .trim()
+            .to_string()
+    };
+
+    // Get local time
+    let now = Local::now();
+    let time_str = format!("{}:{:02} ({})", now.hour(), now.minute(), time_of_day_label(now.hour()));
+
+    // Gather all DB data under one lock
+    let (api_key, base_url, model, context, keystroke_summary, recent_tips, total_active_secs, app_secs, top_windows) = {
         let db = db_state
             .db
             .lock()
@@ -832,37 +915,80 @@ pub async fn generate_tip(
             .unwrap_or_else(|| "openai/gpt-4o-mini".to_string());
 
         let ctx = db.build_chat_context().unwrap_or_default();
+        let ks_summary = db.summarize_recent_keystrokes(2048).unwrap_or_default();
+        let tips = db.get_recent_tips(10).unwrap_or_default();
+        let total = db.get_total_active_secs_today().unwrap_or(0);
+        let app_time = db.get_current_app_time_today(&current_app).unwrap_or(0);
+        let windows = db.get_top_windows_today().unwrap_or_default();
 
-        // Get recent keystrokes for specificity
-        let ks_rows = db.get_recent_keystrokes(2048).unwrap_or_default();
-        let ks_text: String = ks_rows
-            .into_iter()
-            .map(|(app, chars)| format!("[{}] {}", app, chars))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        (key, url, m, ctx, ks_text)
+        (key, url, m, ctx, ks_summary, tips, total, app_time, windows)
     };
     // Lock is dropped here
 
+    // Build system prompt
     let mut system_prompt = String::from(
-        "You are a concise productivity assistant. Based on the activity data below, \
-         generate ONE short actionable tip. Under 3 sentences. Be specific to what the user \
-         is actually doing right now.",
+        "You are a concise productivity assistant. Generate ONE short actionable tip (under 3 sentences).\n\n\
+         Prefix your tip with exactly one category bracket:\n\
+         [SHORTCUT] — keyboard shortcut or tool-specific efficiency tip\n\
+         [WORKFLOW] — process improvement or better way to organize work\n\
+         [FOCUS] — concentration, distraction management, or deep work tip\n\
+         [BREAK] — rest, ergonomics, or health reminder\n\n\
+         Be specific to what the user is actually doing right now.\n",
     );
+
+    // Activity context
     system_prompt.push_str(&context);
-    if !keystrokes.is_empty() {
-        system_prompt.push_str("\n\n--- Recent Keystrokes ---\n");
-        system_prompt.push_str(&keystrokes);
+
+    // Keystroke summary
+    if !keystroke_summary.is_empty() && keystroke_summary != "No recent keystrokes recorded." {
+        system_prompt.push_str("\n--- Recent Keystroke Summary ---\n");
+        system_prompt.push_str(&keystroke_summary);
+        system_prompt.push('\n');
     }
+
+    // Previous tips for dedup
+    if !recent_tips.is_empty() {
+        system_prompt.push_str("\n--- Previous Tips (DO NOT repeat any of these) ---\n");
+        for (i, (content, _created_at)) in recent_tips.iter().enumerate() {
+            system_prompt.push_str(&format!("{}. {}\n", i + 1, content));
+        }
+    }
+
+    // Build structured user message
+    let top3: String = top_windows
+        .iter()
+        .take(3)
+        .map(|(app, secs)| format!("{} ({})", app, format_active_time(*secs)))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let user_message = format!(
+        "Current time: {}\n\
+         Current app: {}\n\
+         Time in current app today: {}\n\
+         Total active time today: {}\n\
+         Top 3 apps today: {}",
+        time_str,
+        current_app,
+        format_active_time(app_secs),
+        format_active_time(total_active_secs),
+        if top3.is_empty() { "none yet".to_string() } else { top3 },
+    );
 
     let messages = vec![
         ChatMessage::text("system", &system_prompt),
-        ChatMessage::text("user", "Give me a productivity tip based on my current activity."),
+        ChatMessage::text("user", &user_message),
     ];
 
     let client = reqwest::Client::new();
-    ai::chat_completion(&client, &base_url, &api_key, &model, messages).await
+    let tip = ai::chat_completion(&client, &base_url, &api_key, &model, messages).await?;
+
+    // Save tip to DB for future dedup (best-effort, second lock)
+    if let Ok(db) = db_state.db.lock() {
+        let _ = db.insert_tip(&tip);
+    }
+
+    Ok(tip)
 }
 
 /// Extract a JSON array from text that may contain markdown code fences or surrounding text.

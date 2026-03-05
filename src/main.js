@@ -8,6 +8,7 @@ import { initStats } from "./stats.js";
 import { initProjects } from "./projects.js";
 import { startTagger } from "./tagger.js";
 import { initTips } from "./tips.js";
+import { initNotes } from "./notes.js";
 
 const historyView = document.getElementById("history-view");
 const chatView = document.getElementById("chat-view");
@@ -48,6 +49,7 @@ loadSettings();
 initStats();
 initProjects();
 initTips();
+initNotes();
 startTagger();
 
 // Wire header buttons
